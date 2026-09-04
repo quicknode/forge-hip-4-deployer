@@ -1,0 +1,21 @@
+# dependencies and build output
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+.vercel
+
+# environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# local tooling
+shoot.mjs
