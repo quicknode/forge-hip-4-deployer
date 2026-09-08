@@ -1,21 +1,25 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAccount } from 'wagmi';
 
 import { useL1Sign } from '../lib/useL1Sign';
+import { storedDeployerAddress } from '../lib/agent';
 
-import { friendlyError } from '../lib/errors';
+import { errText, friendlyError } from '../lib/errors';
+import { startFaviconSpin, stopFaviconSpin } from '../lib/favicon';
 import {
   buildSettleAction,
   cleanLabel,
   fetchOutcomeMeta,
+  fetchTemplates,
+  hydrateOutcome,
   isJunkMarket,
   isLowQuality,
   marketCategory,
   sendExchange,
   stampToMs,
   stampToUtcLabel,
+  type HydratedOutcome,
   type OutcomeMetaEntry,
 } from '../lib/hl';
 
@@ -41,32 +45,45 @@ export default function LiveMarkets({
   onIdFound: (deployedAt: string, id: number) => void;
 }) {
   const [view, setView] = useState<'all' | 'mine'>(mine.length > 0 ? 'mine' : 'all');
-  const [outcomes, setOutcomes] = useState<OutcomeMetaEntry[] | null>(null);
+  const [outcomes, setOutcomes] = useState<HydratedOutcome[] | null>(null);
+  const [myVenue, setMyVenue] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [shown, setShown] = useState(36);
   const [open, setOpen] = useState<OutcomeMetaEntry | null>(null);
   const [retry, setRetry] = useState(0);
   const [showJunk, setShowJunk] = useState(false);
+  const [showPast, setShowPast] = useState(false);
   const [sort, setSort] = useState<'new' | 'old' | 'az'>('new');
   const [category, setCategory] = useState<string>('all');
 
   useEffect(() => {
     setError(null);
-    fetchOutcomeMeta()
-      .then((m) => setOutcomes([...m.outcomes].reverse()))
+    // templates let us render "template:binaryPrice" deploys back into questions;
+    // if that fetch fails the board still loads, just unhydrated
+    Promise.all([fetchOutcomeMeta(), fetchTemplates().catch(() => [])])
+      .then(([m, ts]) => {
+        const byId = new Map(ts.map((t) => [t.id, t]));
+        setOutcomes([...m.outcomes].reverse().map((o) => hydrateOutcome(o, byId)));
+        const dep = storedDeployerAddress()?.toLowerCase();
+        setMyVenue(dep ? (m.deployers ?? []).find((d) => d.deployer.toLowerCase() === dep)?.venue ?? null : null);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, [retry]);
 
   const curated = useMemo(() => {
-    if (!outcomes) return { shownList: [] as OutcomeMetaEntry[], junkCount: 0 };
+    if (!outcomes) return { shownList: [] as HydratedOutcome[], junkCount: 0, pastCount: 0 };
     const junkCount = outcomes.filter(isJunkMarket).length;
-    const base = showJunk ? outcomes : outcomes.filter((o) => !isJunkMarket(o));
+    let base = showJunk ? outcomes : outcomes.filter((o) => !isJunkMarket(o));
+    // markets past their settlement time are over; keep the board current by default
+    const now = Date.now();
+    const pastCount = base.filter((o) => o.timeMs !== null && o.timeMs < now).length;
+    if (!showPast) base = base.filter((o) => o.timeMs === null || o.timeMs >= now);
     // real questions first (each group stays newest-first), test leftovers after
     const good = base.filter((o) => !isLowQuality(o));
     const rest = base.filter(isLowQuality);
-    return { shownList: [...good, ...rest], junkCount };
-  }, [outcomes, showJunk]);
+    return { shownList: [...good, ...rest], junkCount, pastCount };
+  }, [outcomes, showJunk, showPast]);
 
   const categories = useMemo(() => {
     const counts = new Map<string, number>();
@@ -140,6 +157,11 @@ export default function LiveMarkets({
             <span style={{ fontSize: 12.5, color: 'var(--ink-40)', whiteSpace: 'nowrap' }}>
               {Math.min(shown, filtered.length)} of {filtered.length}
             </span>
+            {curated.pastCount > 0 && (
+              <button className="linkbtn" onClick={() => setShowPast((v) => !v)}>
+                {showPast ? 'hide' : 'show'} {curated.pastCount} past
+              </button>
+            )}
             {curated.junkCount > 0 && (
               <button className="linkbtn" onClick={() => setShowJunk((v) => !v)}>
                 {showJunk ? 'hide' : 'show'} {curated.junkCount} test markets
@@ -183,7 +205,7 @@ export default function LiveMarkets({
         />
       </div>
       <div hidden={view !== 'mine'}>
-        <MineMarkets mine={mine} outcomes={outcomes} onIdFound={onIdFound} onOpen={setOpen} />
+        <MineMarkets mine={mine} outcomes={outcomes} venue={myVenue} onIdFound={onIdFound} onOpen={setOpen} />
       </div>
 
       {open && <MarketModal market={open} onClose={closeModal} />}
@@ -200,9 +222,9 @@ function AllMarkets({
   onOpen,
   onRetry,
 }: {
-  outcomes: OutcomeMetaEntry[] | null;
+  outcomes: HydratedOutcome[] | null;
   error: string | null;
-  filtered: OutcomeMetaEntry[];
+  filtered: HydratedOutcome[];
   shown: number;
   onMore: () => void;
   onOpen: (o: OutcomeMetaEntry) => void;
@@ -240,7 +262,10 @@ function AllMarkets({
             <div className="body">
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
                 <span className="mono" style={{ color: 'var(--ink-40)' }}>#{o.outcome}</span>
-                <span className="mono" style={{ color: 'var(--ink-40)' }}>{o.quoteToken}</span>
+                <span className="mono" style={{ color: 'var(--ink-40)' }}>
+                  {o.timeMs !== null && o.timeMs < Date.now() ? 'ended · ' : ''}
+                  {o.quoteToken}
+                </span>
               </div>
               <span className="question">{cleanLabel(o.name) || `Market #${o.outcome}`}</span>
               <div style={{ display: 'flex', gap: 8, marginTop: 'auto', alignItems: 'center' }}>
@@ -265,15 +290,16 @@ function AllMarkets({
 function MineMarkets({
   mine,
   outcomes,
+  venue,
   onIdFound,
   onOpen,
 }: {
   mine: ForgedMarket[];
-  outcomes: OutcomeMetaEntry[] | null;
+  outcomes: HydratedOutcome[] | null;
+  venue: string | null;
   onIdFound: (deployedAt: string, id: number) => void;
   onOpen: (o: OutcomeMetaEntry) => void;
 }) {
-  const { isConnected } = useAccount();
   const signL1 = useL1Sign();
   const [checks, setChecks] = useState<Record<string, OracleCheck | { error: string }>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -321,14 +347,30 @@ function MineMarkets({
       armTimer.current = window.setTimeout(() => setArmed((a) => (a === armKey ? null : a)), 6000);
       return;
     }
+    const entry = outcomes?.find((o) => o.outcome === m.outcomeId);
+    if (!entry || !venue) {
+      setSettleResults((s) => ({
+        ...s,
+        [m.deployedAt]: {
+          ok: false,
+          text: !venue
+            ? 'Your deployer venue was not found on chain yet. Refresh and retry.'
+            : 'This market is not visible on the board yet. Refresh and retry in a minute.',
+        },
+      }));
+      return;
+    }
     setArmed(null);
     setSettling(m.deployedAt);
-    const c = checks[m.deployedAt];
-    const details =
-      c && 'responseSha256' in c
-        ? `Settled per Quicknode ${c.basis} read: ${c.value} vs ${c.threshold} (sha256 ${c.responseSha256.slice(0, 16)})`
-        : 'Settled by deployer';
-    const action = buildSettleAction(m.outcomeId, fraction, details, [m.title, m.description], m.sideNames);
+    startFaviconSpin();
+    // the settlement must echo the exchange's RAW stored text; details must be empty
+    const action = buildSettleAction(
+      venue,
+      m.outcomeId,
+      fraction,
+      [entry.rawName, entry.rawDescription],
+      entry.rawSideNames
+    );
     try {
       const res = await sendExchange(signL1, action);
       const raw = JSON.stringify(res.body);
@@ -339,22 +381,52 @@ function MineMarkets({
           : { ok: false, text: friendlyError(raw), raw },
       }));
     } catch (e) {
-      const raw = e instanceof Error ? e.message : String(e);
+      const raw = errText(e);
       setSettleResults((s) => ({ ...s, [m.deployedAt]: { ok: false, text: friendlyError(raw), raw } }));
     } finally {
       setSettling(null);
+      stopFaviconSpin();
     }
   }
 
+  const rawPayload = useCallback((m: ForgedMarket) => {
+    return Object.keys(m.values)
+      .sort()
+      .map((k) => `${k}:${m.values[k]}`)
+      .join('|');
+  }, []);
+
+  const matchOnBoard = useCallback(
+    (m: ForgedMarket) => {
+      if (!outcomes) return undefined;
+      const wantName = `template:${m.templateId}`;
+      const wantDesc = rawPayload(m);
+      const hits = outcomes.filter((o) => o.rawName === wantName && o.rawDescription === wantDesc);
+      // duplicates are possible; the newest is ours (we just deployed it)
+      return hits.length > 0 ? hits.reduce((a, b) => (a.outcome > b.outcome ? a : b)) : undefined;
+    },
+    [outcomes, rawPayload]
+  );
+
+  // ids backfill themselves as soon as the board shows the deploy
+  useEffect(() => {
+    if (!outcomes) return;
+    for (const m of mine) {
+      if (m.outcomeId !== undefined) continue;
+      const match = matchOnBoard(m);
+      if (match) onIdFound(m.deployedAt, match.outcome);
+    }
+  }, [outcomes, mine, matchOnBoard, onIdFound]);
+
   function findId(m: ForgedMarket) {
-    const match = outcomes?.find((o) => o.name === m.title);
+    const match = matchOnBoard(m);
     if (match) {
       onIdFound(m.deployedAt, match.outcome);
       setNotes((s) => ({ ...s, [m.deployedAt]: `Found: market #${match.outcome}.` }));
     } else {
       setNotes((s) => ({
         ...s,
-        [m.deployedAt]: 'No live market with this exact title found yet. Try again in a minute.',
+        [m.deployedAt]: 'Not on the board yet. It appears within a minute of deploying.',
       }));
     }
   }
@@ -385,7 +457,7 @@ function MineMarkets({
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
               <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16 }}>{m.title}</span>
               {live ? (
-                <button className="linkbtn" style={{ color: 'var(--yes)', whiteSpace: 'nowrap' }} onClick={() => onOpen(live)}>
+                <button className="linkbtn" style={{ color: 'var(--highlight)', whiteSpace: 'nowrap' }} onClick={() => onOpen(live)}>
                   #{m.outcomeId} · view →
                 </button>
               ) : (
@@ -396,7 +468,7 @@ function MineMarkets({
             </div>
 
             {m.values.time && (
-              <span style={{ fontSize: 12.5, color: beforeTime ? 'var(--ink-60)' : 'var(--yes)' }}>
+              <span style={{ fontSize: 12.5, color: beforeTime ? 'var(--ink-60)' : 'var(--highlight)' }}>
                 {beforeTime
                   ? `Settles ${stampToUtcLabel(m.values.time)} · locked until then`
                   : `Past settlement time (${stampToUtcLabel(m.values.time)}) · ready to settle`}
@@ -419,7 +491,7 @@ function MineMarkets({
                   <button
                     key={f}
                     className={isArmed ? 'btn-line btn-armed' : 'btn-line'}
-                    disabled={m.outcomeId === undefined || !isConnected || beforeTime || !!settling}
+                    disabled={m.outcomeId === undefined || beforeTime || !!settling}
                     title={beforeTime ? 'Settlement unlocks at the market time' : undefined}
                     onClick={() => settle(m, f)}
                   >
@@ -448,7 +520,7 @@ function MineMarkets({
                     <span style={{ fontSize: 13 }}>
                       {c.basis === 'settlement-time' ? 'Price at settlement time' : 'Current price'}{' '}
                       {c.value.toLocaleString('en-US')} vs {c.threshold.toLocaleString('en-US')} →{' '}
-                      <strong style={{ color: 'var(--yes)' }}>{c.verdict}</strong>
+                      <strong style={{ color: 'var(--highlight)' }}>{c.verdict}</strong>
                       {c.basis === 'current-price' && (
                         <span style={{ color: 'var(--ink-60)' }}> · indicative only, not the settlement value</span>
                       )}
@@ -463,7 +535,7 @@ function MineMarkets({
 
             {sr && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ fontSize: 13, color: sr.ok ? 'var(--yes)' : 'var(--red)' }}>{sr.text}</span>
+                <span style={{ fontSize: 13, color: sr.ok ? 'var(--highlight)' : 'var(--red)' }}>{sr.text}</span>
                 {sr.raw && (
                   <details>
                     <summary className="mono" style={{ cursor: 'pointer', color: 'var(--ink-40)' }}>

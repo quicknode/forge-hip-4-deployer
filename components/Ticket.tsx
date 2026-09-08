@@ -57,9 +57,9 @@ export default function Ticket({
       >
         <span className="mono" style={{ color: 'var(--ink-60)' }}>outcome market · testnet</span>
         {outcomeId !== undefined ? (
-          <span className="stamp stamp-in" style={{ color: 'var(--yes)' }}>live #{outcomeId}</span>
+          <span className="stamp stamp-in" style={{ color: 'var(--highlight)' }}>live #{outcomeId}</span>
         ) : complete ? (
-          <span className="stamp" style={{ color: 'var(--yes)' }}>ready</span>
+          <span className="stamp" style={{ color: 'var(--highlight)' }}>ready</span>
         ) : (
           <span className="mono" style={{ color: 'var(--ink-40)' }}>draft</span>
         )}
@@ -88,6 +88,7 @@ export default function Ticket({
         <span className="odd" data-side="yes">{side(0)} → $1</span>
         <span className="odd" data-side="no">{side(1)} → $1</span>
         <span style={{ flex: 1 }} />
+        <span className="barcode" aria-hidden style={{ width: 64, height: 16, opacity: 0.5 }} />
         <span className="mono" style={{ color: 'var(--ink-40)' }}>{templateId}</span>
       </div>
     </div>

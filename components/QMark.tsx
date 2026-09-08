@@ -9,10 +9,12 @@ export default function QMark({
   size = 64,
   strokeOpacity = 1,
   stroke = 'var(--qn-foreground)',
+  spin = false,
 }: {
   size?: number;
   strokeOpacity?: number;
   stroke?: string;
+  spin?: boolean;
 }) {
   const w = (size * 48) / 72;
   return (
@@ -33,8 +35,10 @@ export default function QMark({
       />
       {/* the dot: the split market disc */}
       <g transform="rotate(-18 24 62)">
-        <circle cx="24" cy="62" r="8" fill="var(--yes)" />
-        <path d="M24 54 A8 8 0 0 1 24 70 Z" fill="var(--no)" />
+        <g className={spin ? 'disc-spin' : undefined}>
+          <circle cx="24" cy="62" r="8" fill="var(--yes)" />
+          <path d="M24 54 A8 8 0 0 1 24 70 Z" fill="var(--no)" />
+        </g>
         <circle cx="24" cy="62" r="8" fill="none" stroke={stroke} strokeOpacity={strokeOpacity} strokeWidth="1.6" />
       </g>
     </svg>

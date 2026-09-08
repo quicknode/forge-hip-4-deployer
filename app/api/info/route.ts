@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   if (raw.length > MAX_BODY) {
     return NextResponse.json({ error: 'body too large' }, { status: 400 });
   }
-  let payload: { type?: unknown; coin?: unknown };
+  let payload: { type?: unknown; coin?: unknown; user?: unknown };
   try {
     payload = JSON.parse(raw);
   } catch {
@@ -37,10 +37,17 @@ export async function POST(req: NextRequest) {
         forwarded = { type: 'l2Book', coin: payload.coin };
       }
       break;
+    case 'spotClearinghouseState':
+    case 'delegatorSummary':
+    case 'extraAgents':
+      if (typeof payload.user === 'string' && /^0x[0-9a-fA-F]{40}$/.test(payload.user)) {
+        forwarded = { type: payload.type, user: payload.user.toLowerCase() };
+      }
+      break;
   }
   if (!forwarded) {
     return NextResponse.json(
-      { error: 'type must be one of: outcomeTemplates, outcomeMeta, meta, l2Book (with coin)' },
+      { error: 'type must be one of: outcomeTemplates, outcomeMeta, meta, l2Book (coin), spotClearinghouseState/delegatorSummary (user)' },
       { status: 400 }
     );
   }
@@ -61,10 +68,7 @@ export async function POST(req: NextRequest) {
     }
     return new NextResponse(body, {
       status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'x-forge-upstream': 'quicknode',
-      },
+      headers: { 'Content-Type': 'application/json' },
     });
   } catch (e) {
     const timeout = e instanceof Error && e.name === 'TimeoutError';

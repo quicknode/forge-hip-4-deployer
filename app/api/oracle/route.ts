@@ -92,7 +92,8 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     source: 'quicknode-info-api',
     basis: settlementMode ? 'settlement-time' : 'current-price',
-    upstream: 'quicknode',
+    // provenance label only — never the endpoint hostname (it identifies the account)
+    upstream: process.env.FORGE_QN_ENDPOINT ? 'Quicknode hype-mainnet' : 'public Hyperliquid API',
     request,
     value,
     threshold,
