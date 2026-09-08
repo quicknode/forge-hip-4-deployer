@@ -40,6 +40,8 @@ export type OutcomeMetaEntry = {
   description: string;
   sideSpecs: { name: string }[];
   quoteToken: string;
+  venue?: string;
+  deployerFeeScale?: string;
 };
 
 export async function fetchInfo<T>(payload: Record<string, unknown>): Promise<T> {
@@ -53,21 +55,58 @@ export async function fetchInfo<T>(payload: Record<string, unknown>): Promise<T>
 }
 
 export const fetchTemplates = () => fetchInfo<OutcomeTemplate[]>({ type: 'outcomeTemplates' });
-export const fetchOutcomeMeta = () =>
-  fetchInfo<{ outcomes: OutcomeMetaEntry[] }>({ type: 'outcomeMeta' });
+export type DeployerEntry = { deployer: string; venue: string; subDeployers: string[] };
 
-/** Deploy action: instantiate a standalone-outcome template. */
+export type WalletReadiness = {
+  exists: boolean;
+  spotHype: number;
+  stakedHype: number; // delegated + undelegated
+};
+
+export async function fetchWalletReadiness(user: string): Promise<WalletReadiness> {
+  const [spot, staking] = await Promise.all([
+    fetchInfo<{ balances: Array<{ coin: string; total: string }> }>({
+      type: 'spotClearinghouseState',
+      user,
+    }),
+    fetchInfo<{ delegated: string; undelegated: string }>({ type: 'delegatorSummary', user }),
+  ]);
+  const balances = spot.balances ?? [];
+  const hype = balances.find((b) => b.coin === 'HYPE');
+  const spotHype = hype ? Number(hype.total) : 0;
+  const stakedHype = Number(staking.delegated ?? 0) + Number(staking.undelegated ?? 0);
+  return {
+    exists: balances.length > 0 || spotHype > 0 || stakedHype > 0,
+    spotHype,
+    stakedHype,
+  };
+}
+
+export type ExtraAgent = { name: string; address: string; validUntil: number };
+export const fetchExtraAgents = (user: string) =>
+  fetchInfo<ExtraAgent[]>({ type: 'extraAgents', user });
+
+export const fetchOutcomeMeta = () =>
+  fetchInfo<{ outcomes: OutcomeMetaEntry[]; deployers?: DeployerEntry[] }>({ type: 'outcomeMeta' });
+
+/**
+ * Deploy action: instantiate a standalone-outcome template. Field order
+ * mirrors the protocol struct (type, venue, operation) — the signature is
+ * over the MessagePack bytes, so order is part of the hash.
+ */
 export function buildRegisterAction(
+  venue: string,
   templateId: string,
   keywordToValue: [string, string][],
   deployerFeeScale = '0'
 ) {
   return {
-    type: 'spotDeploy',
-    outcome: {
+    type: 'outcomeDeploy',
+    venue: venue.trim().toLowerCase(),
+    operation: {
       registerStandaloneOutcomeFromTemplate: {
         id: templateId,
-        // Protocol expects byte-order lexicographic keywords (not locale collation).
+        // sorted lexicographically by keyword (byte order, not locale)
         keywordToValue: [...keywordToValue].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
         deployerFeeScale,
       },
@@ -76,17 +115,23 @@ export function buildRegisterAction(
 }
 
 /** Settlement action for a standalone outcome. settleFraction "1" = YES wins. */
+/**
+ * Settle action. `details` must be the empty string (the exchange refuses
+ * anything else) and nameAndDescription/sideNames must echo the outcome's
+ * RAW on-chain values, not display-rendered ones.
+ */
 export function buildSettleAction(
+  venue: string,
   outcome: number,
   settleFraction: '0' | '1',
-  details: string,
   nameAndDescription: [string, string],
   sideNames: [string, string]
 ) {
   return {
-    type: 'spotDeploy',
-    outcome: {
-      settleOutcome: { outcome, settleFraction, details, nameAndDescription, sideNames },
+    type: 'outcomeDeploy',
+    venue: venue.trim().toLowerCase(),
+    operation: {
+      settleOutcome: { outcome, settleFraction, details: '', nameAndDescription, sideNames },
     },
   };
 }
@@ -157,6 +202,74 @@ export function isLowQuality(o: OutcomeMetaEntry): boolean {
 }
 
 /** Render a template's {keyword} name with current form values. */
+export type HydratedOutcome = OutcomeMetaEntry & {
+  /** settlement time if the market carries one; null = undated */
+  timeMs: number | null;
+  fromTemplate?: string;
+  /** the exchange's stored values, needed verbatim for settlement */
+  rawName: string;
+  rawDescription: string;
+  rawSideNames: [string, string];
+};
+
+/** "k:v|k:v" template-value payloads (how the exchange stores from-template deploys). */
+function parseKeywordValues(desc: string): Record<string, string> | null {
+  if (!desc || !desc.includes(':')) return null;
+  const out: Record<string, string> = {};
+  for (const part of desc.split('|')) {
+    const i = part.indexOf(':');
+    if (i <= 0) return null;
+    out[part.slice(0, i)] = part.slice(i + 1);
+  }
+  return out;
+}
+
+/**
+ * The exchange stores from-template markets as name "template:<id>" plus a
+ * keyword payload in the description; render them back into the question the
+ * deployer actually meant. Anything unrenderable passes through untouched.
+ */
+export function hydrateOutcome(
+  o: OutcomeMetaEntry,
+  templates: Map<string, OutcomeTemplate>
+): HydratedOutcome {
+  const ref = o.name.match(/^template:([\w-]+)$/i);
+  const t = ref ? templates.get(ref[1]) : undefined;
+  const kv = ref ? parseKeywordValues(o.description) : null;
+  if (ref && t && kv) {
+    const display: Record<string, string> = {};
+    for (const [k, v] of Object.entries(kv)) {
+      display[k] = stampToMs(v) !== null ? stampToUtcLabel(v) : v;
+    }
+    // some templates write "{time} UTC" and our stamp label already ends in UTC
+    const dedupeUtc = (x: string) => x.replace(/\bUTC(\s+UTC)+\b/g, 'UTC');
+    return {
+      ...o,
+      rawName: o.name,
+      rawDescription: o.description,
+      rawSideNames: [o.sideSpecs[0]?.name ?? '', o.sideSpecs[1]?.name ?? ''] as [string, string],
+      name: dedupeUtc(renderTemplate(t.name, display)),
+      description: dedupeUtc(renderTemplate(t.description, display)),
+      sideSpecs: o.sideSpecs.map((sp, i) => ({
+        // side names can themselves be placeholders, e.g. "template:{shortNameA}"
+        name:
+          cleanLabel(renderTemplate(sp.name.replace(/^template:/i, ''), kv)) ||
+          t.role.standaloneOutcome?.sideNames[i] ||
+          (i === 0 ? 'Yes' : 'No'),
+      })),
+      timeMs: stampToMs(kv.time ?? kv.resolutionDeadline ?? kv.scheduledStart ?? ''),
+      fromTemplate: ref[1],
+    };
+  }
+  return {
+    ...o,
+    timeMs: null,
+    rawName: o.name,
+    rawDescription: o.description,
+    rawSideNames: [o.sideSpecs[0]?.name ?? '', o.sideSpecs[1]?.name ?? ''] as [string, string],
+  };
+}
+
 export function renderTemplate(text: string, values: Record<string, string>): string {
   return text.replace(/\{(\w+)\}/g, (_, k: string) => values[k] || `{${k}}`);
 }

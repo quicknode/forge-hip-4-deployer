@@ -30,7 +30,7 @@
 }
 
 :root {
-  /* light appearance */
+  /* MDS light (data-theme="white") */
   --qn-background: oklch(100% 0 0);
   --qn-background-elevated: oklch(28.9% 0 0 / 5%);
   --qn-background-inverted: oklch(28.9% 0 0);
@@ -59,7 +59,7 @@
   --highlight: oklch(62% 0.19 145); /* border-strength QN green */
   --yes: var(--qn-accent);
   --yes-ink: var(--qn-accent-foreground);
-  --no: oklch(55% 0.22 300); /* purple accent */
+  --no: oklch(55% 0.22 300); /* MDS purple accent */
   --no-ink: oklch(100% 0 0);
   --amber: var(--qn-warning);
   --red: oklch(55% 0.18 20);
@@ -80,8 +80,8 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    /* dark appearance */
+  :root:not([data-appearance='light']) {
+    /* MDS dark appearance (data-appearance="dark") */
     --qn-background: oklch(28.9% 0 0);
     --qn-background-elevated: oklch(100% 0 0 / 5%);
     --qn-background-inverted: oklch(100% 0 0);
@@ -101,6 +101,28 @@
     --line-strong: oklch(100% 0 0 / 20%);
   }
 }
+:root[data-appearance='dark'] {
+    /* MDS dark appearance (data-appearance="dark") */
+    --qn-background: oklch(28.9% 0 0);
+    --qn-background-elevated: oklch(100% 0 0 / 5%);
+    --qn-background-inverted: oklch(100% 0 0);
+    --qn-foreground: oklch(100% 0 0);
+    --qn-foreground-medium: oklch(100% 0 0 / 70%);
+    --qn-foreground-light: oklch(75% 0.02 261);
+    --qn-foreground-inverted: oklch(28.9% 0 0);
+    --qn-border: oklch(100% 0 0 / 10%);
+    --qn-grid: oklch(42% 0 0);
+    --qn-hover: oklch(100% 0 0 / 5%);
+    --qn-info: oklch(100% 0 0 / 5%);
+    --highlight: var(--qn-accent);
+    --no: oklch(72% 0.16 300);
+    --no-ink: oklch(28.9% 0 0);
+    --red: oklch(70% 0.16 20);
+    --error-text: oklch(78% 0.12 20);
+    --line-strong: oklch(100% 0 0 / 20%);
+}
+:root[data-appearance='dark'] { color-scheme: dark; }
+:root[data-appearance='light'] { color-scheme: light; }
 
 :root {
   color-scheme: light dark;
@@ -154,10 +176,11 @@ h3 {
   word-break: break-all;
 }
 
-/* surfaces: elevated = 5% overlay on background, hairline border, radius-lg */
+/* surfaces: elevated look of the 5% overlay, but OPAQUE (color-mix) so
+   nothing behind a card ever bleeds through its face */
 .card,
 .card-soft {
-  background: var(--qn-background-elevated);
+  background: color-mix(in oklch, var(--qn-background), var(--qn-foreground) 5%);
   border: 1px solid var(--qn-border);
   border-radius: var(--qn-radius-lg);
   min-width: 0;
@@ -382,7 +405,7 @@ button {
 .mktcard {
   position: relative;
   text-align: left;
-  background: var(--qn-background-elevated);
+  background: color-mix(in oklch, var(--qn-background), var(--qn-foreground) 5%);
   border: 1px solid var(--qn-border);
   border-radius: var(--qn-radius-lg);
   padding: 0;
@@ -422,6 +445,66 @@ button {
   min-height: 39px;
 }
 
+/* deployer setup rail */
+.setup-rail {
+  display: flex;
+  align-items: flex-start;
+  padding: 2px 4px 0;
+}
+.setup-station {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  padding: 0;
+  flex: 0 0 auto;
+  cursor: default;
+}
+.setup-station .disc {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--qn-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--qn-foreground-light);
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.setup-station .lbl {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--qn-foreground-light);
+}
+.setup-station[data-state='done'] { cursor: pointer; }
+.setup-station[data-state='done'] .disc {
+  background: var(--qn-foreground);
+  border-color: var(--qn-foreground);
+  color: var(--qn-background);
+}
+.setup-station[data-state='done']:hover .lbl,
+.setup-station[data-peeked='true'] .lbl { color: var(--qn-foreground); text-decoration: underline; }
+.setup-station[data-state='current'] .disc {
+  background: var(--yes);
+  border-color: var(--yes);
+  color: #1a1a1a;
+  font-weight: 600;
+}
+.setup-station[data-state='current'] .lbl { color: var(--qn-foreground); }
+.setup-link {
+  flex: 1;
+  height: 1px;
+  background: var(--qn-border);
+  margin-top: 12px;
+  min-width: 16px;
+}
+.setup-link[data-done='true'] { background: var(--qn-foreground-light); }
+
 /* modal */
 .overlay {
   position: fixed;
@@ -438,19 +521,89 @@ button {
 }
 .modal {
   width: 100%;
-  max-width: 540px;
+  max-width: 940px;
   max-height: 86vh;
-  overflow-y: auto;
-  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  /* the frame never scrolls; .modal-body does, so the scrollbar can't
+     collide with the rounded border */
+  overflow: hidden;
   background: var(--qn-background);
   border: 1px solid var(--qn-border);
   border-radius: var(--qn-radius-lg);
   min-width: 0;
-  animation: rise 170ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.modal-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  flex: 1;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--qn-foreground) 22%, transparent) transparent;
+}
+.modal-body::-webkit-scrollbar { width: 12px; }
+.modal-body::-webkit-scrollbar-track { background: transparent; }
+.modal-body::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--qn-foreground) 22%, transparent);
+  border: 4px solid transparent;
+  background-clip: padding-box;
+  border-radius: 6px;
+}
+.modal-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.85fr);
+  gap: 24px;
+  padding: 20px 26px 24px;
+}
+.modal-rules {
+  border-left: 1px solid var(--qn-border);
+  padding-left: 24px;
+}
+@media (max-width: 820px) {
+  .modal-cols { grid-template-columns: 1fr; }
+  .modal-rules { border-left: none; padding-left: 0; border-top: 1px solid var(--qn-border); padding-top: 18px; }
+}
+/* desktop: the frame is fixed and each column scrolls on its own, so the
+   odds and ladder stay put while long settlement rules scroll beside them */
+@media (min-width: 821px) {
+  .modal-body { overflow: hidden; display: flex; }
+  .modal-cols { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+  .modal-mkt,
+  .modal-rules {
+    overflow-y: auto;
+    min-height: 0;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--qn-foreground) 22%, transparent) transparent;
+  }
+  .modal-mkt::-webkit-scrollbar,
+  .modal-rules::-webkit-scrollbar { width: 12px; }
+  .modal-mkt::-webkit-scrollbar-track,
+  .modal-rules::-webkit-scrollbar-track { background: transparent; }
+  .modal-mkt::-webkit-scrollbar-thumb,
+  .modal-rules::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--qn-foreground) 22%, transparent);
+    border: 4px solid transparent;
+    background-clip: padding-box;
+    border-radius: 6px;
+  }
 }
 .modal * {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+/* enter: overlay fades while the panel settles up into place */
+.modal { animation: modalIn 210ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.975); }
+}
+/* exit: mirrored and slightly faster; the component unmounts after 150ms */
+.overlay-out { animation: fadeOut 150ms ease forwards; }
+.modal-out { animation: modalOut 150ms cubic-bezier(0.4, 0, 0.7, 1) forwards; }
+@keyframes fadeOut {
+  to { opacity: 0; }
+}
+@keyframes modalOut {
+  to { opacity: 0; transform: translateY(10px) scale(0.985); }
 }
 @keyframes fade {
   from { opacity: 0; }
@@ -515,20 +668,96 @@ select.sort {
   animation: stampIn 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 @media (prefers-reduced-motion: reduce) {
-  .overlay, .modal, .stamp-in, .rise, .pane-in { animation: none; }
+  .overlay, .modal, .overlay-out, .modal-out, .stamp-in, .rise, .pane-in, .dotgrid, .dotgrid::before, .qmark-float, .disc-spin { animation: none; }
+  .logo-disc { transition: none; }
   .btn:hover:not(:disabled), .mktcard:hover { transform: none; }
+}
+
+/* geometric textures: they breathe */
+.dotgrid {
+  overflow: hidden;
+  animation: gridBreathe 14s ease-in-out infinite;
+}
+.dotgrid::before {
+  content: '';
+  position: absolute;
+  inset: -170px -102px -170px -102px;
+  background-image: radial-gradient(var(--qn-grid) 1.2px, transparent 1.2px);
+  background-size: 17px 17px;
+  animation: gridDrift 60s linear infinite;
+  will-change: transform;
+}
+@keyframes gridBreathe {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.6; }
+}
+@keyframes gridDrift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(170px, 102px, 0); }
+}
+
+.barcode {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--qn-foreground) 0 2px,
+    transparent 2px 4px,
+    var(--qn-foreground) 4px 5px,
+    transparent 5px 9px,
+    var(--qn-foreground) 9px 12px,
+    transparent 12px 14px,
+    var(--qn-foreground) 14px 15px,
+    transparent 15px 20px
+  );
+}
+
+/* the hero question mark floats; its disc turns slowly */
+.qmark-float {
+  rotate: 12deg;
+  animation: floaty 7s ease-in-out infinite;
+}
+@keyframes floaty {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -9px; }
+}
+.disc-spin {
+  animation: discSpin 26s linear infinite;
+  transform-box: view-box;
+  transform-origin: 24px 62px; /* QMark disc center; explicit for WebKit */
+}
+@keyframes discSpin {
+  to { transform: rotate(360deg); }
+}
+/* 2: logo disc spins on hover via rotate transition — reverses smoothly,
+   always returns to rest, never freezes mid-angle */
+.logo-disc {
+  rotate: 0deg;
+  transition: rotate 1.4s cubic-bezier(0.3, 0, 0.2, 1);
+  transform-box: view-box;
+  transform-origin: 10px 10px;
+}
+.logo-mark:hover .logo-disc {
+  rotate: 360deg;
+}
+
+.modal .punchline::before,
+.modal .punchline::after {
+  display: none;
+}
+
+.hdr-balance {
+  min-width: 92px;
+  justify-content: center;
+}
+@media (max-width: 560px) {
+  .hdr-balance {
+    display: none;
+  }
 }
 
 /* app header band */
 .appbar {
   margin: 0 calc(50% - 50vw);
   padding: 14px calc(50vw - 50%);
-}
-
-/* dot grid, the QN texture, on the hero only */
-.dotgrid {
-  background-image: radial-gradient(var(--qn-grid) 1.2px, transparent 1.2px);
-  background-size: 17px 17px;
 }
 
 .hero-grid {

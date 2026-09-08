@@ -1,16 +1,32 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 
 import LiveMarkets from '../components/LiveMarkets';
 import MarketWizard, { type ForgedMarket } from '../components/MarketWizard';
 import TemplateGallery from '../components/TemplateGallery';
+import AppearanceToggle from '../components/AppearanceToggle';
+import DeployerChip from '../components/DeployerChip';
+import HeaderBalance from '../components/HeaderBalance';
 import QMark from '../components/QMark';
 import Ticket from '../components/Ticket';
-import { fetchInfo, fetchTemplates, type OutcomeTemplate } from '../lib/hl';
+import { fetchInfo, fetchTemplates, type OutcomeTemplate, stampToMs, stampToUtcLabel } from '../lib/hl';
 
 const STORAGE = 'forge:markets';
+
+/** Markets saved before displayValues existed have raw 20260911-2314 stamps
+ * baked into their text; prettify them on load (values stay encoded). */
+function prettifyStoredMarket(m: ForgedMarket): ForgedMarket {
+  const fix = (s: string) =>
+    s.replace(/\b(\d{8}-\d{4})\b/g, (stamp) => (stampToMs(stamp) !== null ? stampToUtcLabel(stamp) : stamp));
+  return {
+    ...m,
+    title: fix(m.title),
+    description: fix(m.description ?? ''),
+    sideNames: [fix(m.sideNames[0]), fix(m.sideNames[1])] as [string, string],
+  };
+}
 
 function loadMarkets(): ForgedMarket[] {
   try {
@@ -29,7 +45,7 @@ function loadMarkets(): ForgedMarket[] {
         !!f.values &&
         typeof f.values === 'object'
       );
-    });
+    }).map(prettifyStoredMarket);
   } catch {
     return [];
   }
@@ -44,6 +60,33 @@ export default function Page() {
   const [markets, setMarkets] = useState<ForgedMarket[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [templateRetry, setTemplateRetry] = useState(0);
+  const galleryScroll = useRef(0);
+
+  function openTemplate(id: string) {
+    galleryScroll.current = window.scrollY;
+    setSelectedId(id);
+    window.scrollTo({ top: 0 });
+  }
+
+  function backToGallery() {
+    setSelectedId(null);
+    requestAnimationFrame(() => window.scrollTo({ top: galleryScroll.current }));
+  }
+
+  // location lives in the hash (#live, #create/<template>) so refresh keeps it
+  useEffect(() => {
+    const h = window.location.hash.slice(1);
+    if (!h) return;
+    const [t, id] = h.split('/');
+    if (t === 'live') setTab('live');
+    else if (t === 'create' && id) setSelectedId(decodeURIComponent(id));
+  }, []);
+
+  useEffect(() => {
+    // homepage keeps a clean URL: no hash at all
+    const h = tab === 'live' ? '#live' : selectedId ? `#create/${encodeURIComponent(selectedId)}` : window.location.pathname;
+    window.history.replaceState(null, '', h);
+  }, [tab, selectedId]);
 
   useEffect(() => {
     setMarkets(loadMarkets());
@@ -122,9 +165,13 @@ export default function Page() {
           href="#"
           onClick={(e) => {
             e.preventDefault();
+            // full home reset: create tab, gallery view, top of page
+            setSelectedId(null);
             setTab('create');
+            window.scrollTo({ top: 0 });
           }}
           aria-label="Forge"
+          className="logo-mark"
           style={{
             display: 'inline-flex',
             alignItems: 'baseline',
@@ -144,8 +191,10 @@ export default function Page() {
             viewBox="0 0 20 20"
             style={{ margin: '0 1px', transform: 'rotate(-18deg) translateY(1.5px)' }}
           >
-            <circle cx="10" cy="10" r="9" fill="var(--yes)" />
-            <path d="M10 1 A9 9 0 0 1 10 19 Z" fill="var(--no)" />
+            <g className="logo-disc">
+              <circle cx="10" cy="10" r="9" fill="var(--yes)" />
+              <path d="M10 1 A9 9 0 0 1 10 19 Z" fill="var(--no)" />
+            </g>
             <circle cx="10" cy="10" r="9" fill="none" stroke="var(--qn-foreground)" strokeWidth="1.4" />
           </svg>
           rge
@@ -175,7 +224,12 @@ export default function Page() {
         </div>
 
         <div style={{ flex: 1 }} />
+        <AppearanceToggle />
         <span className="odd" data-side="ghost">● testnet</span>
+        <HeaderBalance />
+        <DeployerChip />
+        {/* showBalance must stay false: RainbowKit shows HyperEVM gas HYPE,
+            a different ledger from the Hypercore spot/staked HYPE Forge uses */}
         <ConnectButton showBalance={false} chainStatus="none" accountStatus="address" />
       </header>
 
@@ -197,12 +251,24 @@ export default function Page() {
                 </p>
                 <div style={{ display: 'flex', gap: 0, marginTop: 26, flexWrap: 'wrap' }}>
                   {[
-                    ['1', 'Create', 'pick a format, fill the blanks, sign'],
-                    ['2', 'Trade', 'anyone buys Yes or No on the order book'],
-                    ['3', 'Settle', 'after the deadline, you post the result'],
+                    ['create', 'Create', 'pick a format, fill the blanks, sign'],
+                    ['trade', 'Trade', 'anyone buys Yes or No on the order book'],
+                    ['settle', 'Settle', 'after the deadline, you post the result'],
                   ].map(([n, t, d], i) => (
                     <div key={n} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, paddingRight: 16, marginRight: 16, borderRight: i < 2 ? '1px solid var(--qn-border)' : 'none', maxWidth: 158 }}>
-                      <span className="mono" style={{ color: 'var(--qn-foreground-light)', paddingTop: 2 }}>{n}</span>
+                      <svg aria-hidden width="14" height="14" viewBox="0 0 14 14" style={{ marginTop: 4, flexShrink: 0 }}>
+                        {n === 'create' && (
+                          <circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--qn-foreground-light)" strokeWidth="1.6" />
+                        )}
+                        {n === 'trade' && (
+                          <>
+                            <circle cx="7" cy="7" r="6" fill="var(--yes)" />
+                            <path d="M7 1 A6 6 0 0 1 7 13 Z" fill="var(--no)" />
+                            <circle cx="7" cy="7" r="6" fill="none" stroke="var(--qn-foreground-light)" strokeWidth="1" />
+                          </>
+                        )}
+                        {n === 'settle' && <circle cx="7" cy="7" r="6" fill="var(--qn-foreground)" />}
+                      </svg>
                       <span style={{ fontSize: 12.5, lineHeight: 1.4 }}>
                         <strong>{t}</strong>
                         <br />
@@ -213,9 +279,20 @@ export default function Page() {
                 </div>
               </div>
               <div aria-hidden style={{ pointerEvents: 'none', position: 'relative' }}>
-                <div style={{ position: 'absolute', right: -92, top: -118, transform: 'rotate(12deg)' }}>
-                  <QMark size={210} strokeOpacity={0.12} />
+                <div
+                  className="dotgrid"
+                  style={{
+                    position: 'absolute',
+                    inset: '-60px -40px -40px -40px',
+                    maskImage: 'radial-gradient(ellipse 55% 48% at 80% 12%, black, transparent 72%)',
+                    WebkitMaskImage: 'radial-gradient(ellipse 55% 48% at 80% 12%, black, transparent 72%)',
+                    opacity: 0.55,
+                  }}
+                />
+                <div className="qmark-float" style={{ position: 'absolute', right: -74, top: -120, zIndex: 0 }}>
+                  <QMark size={230} strokeOpacity={0.14} spin />
                 </div>
+                <div style={{ position: 'relative', zIndex: 1 }}>
                 <Ticket
                   tilt
                   templateId="binaryPrice2"
@@ -225,6 +302,7 @@ export default function Page() {
                   values={{ perp: 'BTC', threshold: '80,000', time: 'Sep 1, 12:00 UTC' }}
                   complete
                 />
+                </div>
               </div>
             </section>
           )}
@@ -234,7 +312,7 @@ export default function Page() {
               key={template.id}
               template={template}
               perps={perps}
-              onBack={() => setSelectedId(null)}
+              onBack={backToGallery}
               onForged={onForged}
               onViewMine={() => setTab('live')}
             />
@@ -247,7 +325,7 @@ export default function Page() {
                   validator-approved · read live from chain
                 </span>
               </div>
-              <TemplateGallery templates={templates} error={templatesError} onSelect={setSelectedId} onRetry={() => setTemplateRetry((n) => n + 1)} />
+              <TemplateGallery templates={templates} error={templatesError} onSelect={openTemplate} onRetry={() => setTemplateRetry((n) => n + 1)} />
             </>
           )}
         </>

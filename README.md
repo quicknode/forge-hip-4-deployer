@@ -44,19 +44,28 @@ Settlement is the deployer's job and wrong settlements are slashable. The app re
 
 ## How signing works
 
-Hyperliquid L1 actions sign against a phantom EIP-712 domain: `keccak(msgpack(action) || nonce_u64_be || 0x00)` becomes the `connectionId` of an `Agent{source, connectionId}` message on chainId 1337, where source `"b"` means testnet. Your key never leaves the wallet; the app sends only `{action, nonce, signature}`.
+Hyperliquid L1 actions sign against a phantom EIP-712 domain: `keccak(msgpack(action) || nonce_u64_be || 0x00)` becomes the `connectionId` of an `Agent{source, connectionId}` message on chainId 1337, where source `"b"` means testnet. The app sends only `{action, nonce, signature}`.
 
-One sharp edge worth knowing: viem 2.5x refuses to sign typed data whose domain chainId (1337) differs from the connected chain (HyperEVM testnet is 998). Forge bypasses this by calling `eth_signTypedData_v4` on the connector's raw EIP-1193 provider (`lib/useL1Sign.ts`), which wallets accept without a network switch. This is also how Hyperliquid's own frontends do it.
+Two hard constraints shape the architecture, both learned against the live exchange:
+
+1. Browser wallets refuse the phantom domain. Modern MetaMask hard-rejects any typed-data signature whose domain chainId (1337) differs from the connected chain (998), at the extension level. No bypass survives this.
+2. Approved agent/API wallets can only sign trading operations. Deployer-class actions (`activateOutcomeDeployer`, `outcomeDeploy`) must be signed by the deployer account itself; an agent-signed attempt fails with `Must deposit before performing actions. User: <agent address>`.
+
+So the deployer is its own account, the way real HIP-4 operators run: Forge derives a deployer key from one ordinary `personal_sign` over a fixed message (`lib/agent.ts`). Signatures are deterministic, so the same wallet always re-derives the same deployer, on any browser — the wallet is the recovery mechanism. The key lives in localStorage as a cache, you fund it once with 100.5 HYPE on Hypercore, and it signs staking, venue activation, deploys, and settles silently as itself. The wallet's only signatures are the derivation and the funding transfer. A header chip exposes the address and a private-key backup at all times.
 
 ## The HIP-4 action schemas
 
-These are not officially documented anywhere. They were read back from the live API and verified against community SDK source:
+These are not officially documented anywhere. They were reconstructed from community SDK source and verified against the live exchange:
 
 ```jsonc
+// claim a venue (one-time; commits the stake for the 183-day minimum staking period)
+{ "type": "activateOutcomeDeployer", "activate": { "venueName": "qn" } }
+
 // deploy a standalone outcome from a template
 {
-  "type": "spotDeploy",
-  "outcome": {
+  "type": "outcomeDeploy",
+  "venue": "qn",
+  "operation": {
     "registerStandaloneOutcomeFromTemplate": {
       "id": "binaryPrice2",
       "keywordToValue": [["perp", "BTC"], ["threshold", "80000"], ["time", "20260901-1200"]],
@@ -67,18 +76,21 @@ These are not officially documented anywhere. They were read back from the live 
 
 // settle it ("1" = first side wins, "0" = second side)
 {
-  "type": "spotDeploy",
-  "outcome": {
+  "type": "outcomeDeploy",
+  "venue": "qn",
+  "operation": {
     "settleOutcome": {
       "outcome": 10218,
       "settleFraction": "1",
-      "details": "Settled per price read ...",
-      "nameAndDescription": ["...", "..."],
-      "sideNames": ["Yes", "No"]
+      "details": "",  // must be empty; the exchange refuses anything else
+      "nameAndDescription": ["<raw stored name>", "<raw stored description>"],
+      "sideNames": ["<raw>", "<raw>"]
     }
   }
 }
 ```
+
+Settlement must echo the exchange's raw stored text (a from-template market is stored as `template:<id>` plus a `k:v|k:v` payload), not anything display-rendered. Venue names are 2 to 4 lowercase letters. Deactivating a deployer is permanent.
 
 `keywordToValue` must be sorted by byte order. Outcome asset ids follow `#(10 * outcomeId + side)`; that string works in `l2Book` and order placement. Prices live in [0.001, 0.999], sizes are integers, collateral is USDH/USDC depending on the market.
 
@@ -86,7 +98,7 @@ These are not officially documented anywhere. They were read back from the live 
 
 All chain reads go through two API routes so Quicknode endpoint tokens stay server-side. The routes constrain request shape, not volume: they carry no auth or rate limit of their own, so put a rate limit in front of them before hosting publicly (see Deploying).
 
-- `POST /api/info` rebuilds the upstream body from a per-type whitelist (`outcomeTemplates`, `outcomeMeta`, `meta`, `l2Book` with a coin) and rejects everything else. Bodies over 512 bytes bounce.
+- `POST /api/info` rebuilds the upstream body from a per-type whitelist (`outcomeTemplates`, `outcomeMeta`, `meta`, `l2Book` with a coin, and `spotClearinghouseState`/`delegatorSummary`/`extraAgents` with a user address) and rejects everything else. Bodies over 512 bytes bounce.
 - `POST /api/oracle` reads either the current mid (`allMids`) or, given a past `atMs`, the 1-minute candle at that timestamp. The response says which basis it used, and the UI treats current-price reads as indicative only.
 
 ## Design
