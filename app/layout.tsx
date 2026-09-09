@@ -3,7 +3,12 @@ import type { Metadata } from 'next';
 import Providers from './providers';
 import './globals.css';
 
-const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:5210';
+// social-card base: explicit override > Vercel's own production URL > local dev
+const SITE =
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : 'http://localhost:5210');
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE),
