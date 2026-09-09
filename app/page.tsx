@@ -8,6 +8,7 @@ import MarketWizard, { type ForgedMarket } from '../components/MarketWizard';
 import TemplateGallery from '../components/TemplateGallery';
 import AppearanceToggle from '../components/AppearanceToggle';
 import DeployerChip from '../components/DeployerChip';
+import QuicknodeMark from '../components/QuicknodeMark';
 import HeaderBalance from '../components/HeaderBalance';
 import QMark from '../components/QMark';
 import Ticket from '../components/Ticket';
@@ -350,6 +351,16 @@ export default function Page() {
         }}
       >
         <span>Chain reads served by Quicknode. Price checks carry evidence hashes.</span>
+        <a
+          href="https://www.quicknode.com"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Powered by Quicknode"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'inherit', textDecoration: 'none' }}
+        >
+          <span style={{ whiteSpace: 'nowrap' }}>Powered by</span>
+          <QuicknodeMark height={14} style={{ color: 'var(--qn-foreground)', display: 'block' }} />
+        </a>
         <span>Testnet only. Settle honestly.</span>
       </footer>
     </div>
