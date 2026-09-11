@@ -28,7 +28,7 @@ Optional `.env.local`:
 |---|---|
 | `FORGE_QN_TESTNET_ENDPOINT` | Quicknode Hyperliquid testnet endpoint. Info reads route through it server-side; the token never reaches the browser. |
 | `FORGE_QN_ENDPOINT` | Quicknode Hyperliquid mainnet endpoint, used by the settlement price oracle. |
-| `NEXT_PUBLIC_SITE_URL` | Public URL for OpenGraph metadata. |
+| `NEXT_PUBLIC_SITE_URL` | Public URL for OpenGraph metadata on local and preview builds. Production builds always use `https://www.forgedeploy.info`. |
 
 Without the endpoints, reads fall back to the public Hyperliquid API.
 
@@ -136,7 +136,7 @@ The app is a plain Next.js project: one static page and two Node API routes. On 
 |---|---|
 | `FORGE_QN_TESTNET_ENDPOINT` | Quicknode Hyperliquid testnet endpoint URL |
 | `FORGE_QN_ENDPOINT` | Quicknode Hyperliquid mainnet endpoint URL |
-| `NEXT_PUBLIC_SITE_URL` | The production URL, for OpenGraph metadata |
+| `NEXT_PUBLIC_SITE_URL` | Preview-deploy URL for OpenGraph metadata. Ignored on production builds, which use `https://www.forgedeploy.info`. |
 
 Both routes wait up to 20 seconds on upstream, so set the function max duration to at least 25 seconds.
 
