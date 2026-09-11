@@ -3,15 +3,18 @@ import type { Metadata } from 'next';
 import Providers from './providers';
 import './globals.css';
 
-// social-card base: explicit override > Vercel's own production URL > local dev
+const PRODUCTION_SITE = 'https://www.forgedeploy.info';
 const SITE =
-  process.env.NEXT_PUBLIC_SITE_URL ??
-  (process.env.VERCEL_PROJECT_PRODUCTION_URL
-    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-    : 'http://localhost:5210');
+  process.env.VERCEL_ENV === 'production'
+    ? PRODUCTION_SITE
+    : process.env.NEXT_PUBLIC_SITE_URL ??
+      (process.env.VERCEL_PROJECT_PRODUCTION_URL
+        ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+        : 'http://localhost:5210');
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE),
+  alternates: { canonical: '/' },
   title: 'Forge: got a question? Make it a market.',
   description:
     'Deploy HIP-4 outcome markets on Hyperliquid testnet. Pick a validator-approved format, fill in the blanks, sign with your wallet, and the crowd trades yes against no until you settle it. Chain reads served by Quicknode.',
